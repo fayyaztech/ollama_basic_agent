@@ -66,8 +66,11 @@ def run_safe_command(base_cmd, *args):
         return f"Error: Command '{base_cmd}' is not in the safe whitelist. Available: {', '.join(sorted(WHITELISTED_BASES))}"
     
     try:
+        # Expand ~ in all arguments
+        expanded_args = [os.path.expanduser(arg) if isinstance(arg, str) else arg for arg in args]
+        
         # Construct the command list: [base_cmd, arg1, arg2, ...]
-        cmd = [base_cmd] + list(args)
+        cmd = [base_cmd] + expanded_args
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             return result.stdout if result.stdout else "Command executed successfully (no output)."
