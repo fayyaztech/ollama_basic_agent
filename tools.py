@@ -2,10 +2,22 @@ import subprocess
 import psutil
 import os
 
+def open_file(path):
+    """Open a file or directory using the default system handler."""
+    try:
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.exists(path):
+            return f"Error: Path '{path}' does not exist."
+        
+        # Use xdg-open for Linux
+        subprocess.run(["xdg-open", path], check=True)
+        return f"Successfully opened '{path}'."
+    except Exception as e:
+        return f"Error opening file: {e}"
+
 def list_directory(path=".", show_sizes=False, include_dir_size=False):
     """List files and folders with optional size info (read-only, safe)."""
     try:
-        # Expand ~ if it exists and make absolute
         path = os.path.abspath(os.path.expanduser(path))
         items = os.listdir(path)
         result = []
@@ -156,5 +168,6 @@ AVAILABLE_TOOLS = {
     "get_system_status": get_system_status,
     "run_safe_command": run_safe_command,
     "gpu_status": gpu_status,
-    "list_directory": list_directory
+    "list_directory": list_directory,
+    "open_file": open_file
 }

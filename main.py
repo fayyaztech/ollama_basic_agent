@@ -16,8 +16,8 @@ RESPONSE FORMAT:
 
 STRICT RULES:
 1. ONLY respond with the JSON object. No extra text.
-2. If the user request is NOT covered by a tool, set "tool": null.
-3. NEVER provide manual terminal commands or instructions.
+2. If a request is a general question (Knowledge/Why/What) not requiring a tool, set "tool": null and provide a detailed explanation in "thought".
+3. NEVER provide manual terminal commands or instructions for the user to run.
 4. "args" MUST be a list.
 
 AVAILABLE TOOLS:
@@ -27,7 +27,21 @@ AVAILABLE TOOLS:
 - get_system_status(): Returns CPU/RAM usage.
 - gpu_status(): Returns GPU usage.
 - list_directory(path=".", show_sizes=False, include_dir_size=False): List files/folders with optional size info.
+- open_file(path): Opens a file or directory using the default system handler.
 - run_safe_command(base_cmd, *args): Runs whitelisted command (ls, cat, df, uptime, nvidia-smi, yt-dlp, ffmpeg).
+
+TIPS:
+- Paths: "~" expands to your home directory.
+- Memory: Recap what you did recently.
+- Truth: Trust the tool output. If the tool lists it, IT IS THERE.
+
+REASONING STEPS:
+1. If the user asks for a file (e.g., "firebase video"):
+   a. Call list_directory(parent_path) to see what's actually there.
+   b. Look at the result. If you see "firebase intigration.mp4", THAT IS THE FILE.
+   c. Use the EXACT name found in the tool output for your next action.
+2. NEVER say a file is missing if it was in the tool result.
+3. If no match is found, apologize and ask for the correct name.
 
 CURRENT MEMORY:
 {memory_context}
@@ -139,11 +153,14 @@ def main():
             args = data.get("args", [])
             
             if not tool_name or tool_name.lower() == "null":
+                # Final step: print the thought as the actual response
+                thought = data.get('thought', 'Found the results.')
+                print(f"\nResponse: {thought}")
                 history.append({"role": "assistant", "content": full_raw_response})
                 break
                 
             if (tool_name, str(args)) == last_tool_call:
-                print(f"[!] Warning: Repeat call. Stopping.")
+                print(f"\n[!] Error: Repeated identical tool call detected. Stopping.")
                 break
             
             last_tool_call = (tool_name, str(args))
@@ -157,15 +174,26 @@ def main():
                     # Update Memory
                     mem.update(tool_name, tool_result, args)
                     
-                    messages.append({"role": "assistant", "content": full_raw_response})
-                    messages.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} returned: {tool_result}"})
+                    # Store in message history for context
                     history.append({"role": "assistant", "content": full_raw_response})
                     history.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} returned: {tool_result}"})
+                    
+                    # Update local messages for the next step in the loop
+                    messages.append({"role": "assistant", "content": full_raw_response})
+                    messages.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} returned: {tool_result}"})
                 except Exception as e:
-                    print(f"[!] Tool Error: {e}")
-                    messages.append({"role": "user", "content": f"[SYSTEM]: Error executing {tool_name}: {e}"})
+                    print(f"\n[!] Tool Execution Error: {e}")
+                    error_msg = f"I apologize, but I encountered an error while trying to execute the {tool_name} tool: {e}"
+                    print(f"Response: {error_msg}")
+                    break
             else:
-                print(f"[!] Tool {tool_name} not found.")
+                print(f"\n[!] Tool Error: '{tool_name}' not found.")
+                apology = f"I apologize, but '{tool_name}' is not currently in my authorized toolset. I can only perform actions via my available tools: {', '.join(AVAILABLE_TOOLS.keys())}."
+                print(f"Response: {apology}")
+                break
+
+        if step == 1 and not data:
+            print("\nResponse: I apologize, but I encountered an internal error processing your request.")
 
 if __name__ == "__main__":
     main()
