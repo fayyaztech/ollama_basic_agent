@@ -14,7 +14,8 @@ HOME_DIR = os.path.expanduser("~")
 # Commands that are allowed to run
 WHITELISTED_CMDS = {
     "nvidia-smi", "whoami", "uptime", "df",
-    "ls", "cat", "yt-dlp", "ffmpeg", "ffprobe"
+    "ls", "cat", "yt-dlp", "ffmpeg", "ffprobe",
+    "date", "hostname", "uname",   # safe read-only system info
 }
 
 # Commands restricted to home directory paths only

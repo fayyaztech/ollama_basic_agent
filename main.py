@@ -91,7 +91,7 @@ RESPONSE FORMAT:
 }}
 
 STRICT RULES:
-1. ONLY respond with the JSON object. No extra text.
+1. ONLY respond with the JSON object. No extra text. No explanation after the closing brace.
 2. If a request is a general question (Knowledge/Why/What) not requiring a tool, set "tool": null and provide a detailed explanation in "thought".
 3. NEVER provide manual terminal commands or instructions for the user to run.
 4. "args" MUST always be a list, even if empty: [].
@@ -105,7 +105,14 @@ AVAILABLE TOOLS:
 - gpu_status(): Returns GPU usage.
 - list_directory(path=".", show_sizes=False, include_dir_size=False): List files/folders.
 - open_file(path): Opens a file or directory using the default system handler.
-- run_safe_command(base_cmd, *args): Runs whitelisted command (ls, cat, df, uptime, nvidia-smi, yt-dlp, ffmpeg).
+- run_safe_command(base_cmd, *args): Runs whitelisted command (ls, cat, df, uptime, date, hostname, uname, nvidia-smi, yt-dlp, ffmpeg).
+
+TOOL USAGE EXAMPLES:
+- User: "read ~/.bashrc"         → {{"thought": "...", "tool": "run_safe_command", "args": ["cat", "~/.bashrc"]}}
+- User: "what time is it?"       → {{"thought": "...", "tool": "run_safe_command", "args": ["date"]}}
+- User: "list home directory"    → {{"thought": "...", "tool": "run_safe_command", "args": ["ls", "~"]}}
+- User: "check disk space"       → {{"thought": "...", "tool": "run_safe_command", "args": ["df", "-h"]}}
+- User: "show my username"       → {{"thought": "...", "tool": "run_safe_command", "args": ["whoami"]}}
 
 TIPS:
 - Paths: "~" expands to your home directory.
@@ -123,6 +130,11 @@ REASONING STEPS:
 MEDIA REASONING:
 - If asked to "check" or "show formats": Use run_safe_command("yt-dlp", "-F", url).
 - NEVER call download_youtube(url) unless "download" or "get" is clearly intended.
+
+SSH KEY SECURITY:
+- Files ending in .pub (e.g. id_rsa.pub, id_ed25519.pub) are PUBLIC keys — safe to read and display freely.
+- Files WITHOUT .pub (e.g. id_rsa, id_ed25519) are PRIVATE keys — NEVER read or display them under any circumstance.
+- If asked to read a .pub file, use run_safe_command("cat", "~/.ssh/<filename>.pub").
 
 CURRENT MEMORY:
 {memory_context}
@@ -187,14 +199,43 @@ class MemoryManager:
 # ─────────────────────────────────────────────
 
 def extract_json(text: str) -> dict | None:
-    """Extract and parse the first JSON object found in LLM output."""
+    """
+    Extract and parse a JSON object from LLM output.
+
+    Strategy:
+      1. Find ALL {...} blocks in the text.
+      2. Try each from largest to smallest — the biggest block is most
+         likely the complete response, not a fragment.
+      3. Only accept objects that contain at least a 'thought' key,
+         which guards against partial blocks like {"tool": null, "args": []}.
+      4. Fall back to parsing the whole text if no block matched.
+
+    This handles models (e.g. deepseek) that emit valid JSON then keep
+    writing prose after the closing brace.
+    """
+    # Collect all {...} spans, sorted by length descending
+    candidates = sorted(
+        re.findall(r"\{.*?\}|\{.*\}", text, re.DOTALL),
+        key=len,
+        reverse=True
+    )
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict) and "thought" in obj:
+                return obj
+        except json.JSONDecodeError:
+            continue
+
+    # Last resort: try the whole text
     try:
-        match = re.search(r"(\{.*\})", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-        return json.loads(text)
+        obj = json.loads(text.strip())
+        if isinstance(obj, dict):
+            return obj
     except (json.JSONDecodeError, TypeError):
-        return None
+        pass
+
+    return None
 
 
 def select_model(models: list, logger: logging.Logger) -> str:
