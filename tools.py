@@ -1,5 +1,45 @@
 import subprocess
 import psutil
+import os
+
+def list_directory(path=".", show_sizes=False, include_dir_size=False):
+    """List files and folders with optional size info (read-only, safe)."""
+    try:
+        items = os.listdir(path)
+        result = []
+
+        for item in items:
+            full_path = os.path.join(path, item)
+
+            if os.path.isdir(full_path):
+                if show_sizes and include_dir_size:
+                    size = get_dir_size(full_path)
+                    result.append(f"[DIR] {item} ({size} bytes)")
+                else:
+                    result.append(f"[DIR] {item}")
+            else:
+                if show_sizes:
+                    size = os.path.getsize(full_path)
+                    result.append(f"[FILE] {item} ({size} bytes)")
+                else:
+                    result.append(f"[FILE] {item}")
+
+        return "\n".join(result) if result else "Directory is empty."
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def get_dir_size(path):
+    """Calculate total size of a directory (recursive)."""
+    total_size = 0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            try:
+                fp = os.path.join(root, f)
+                total_size += os.path.getsize(fp)
+            except:
+                pass
+    return total_size
 
 def run_safe_command(base_cmd, *args):
     """Run a whitelisted base command with optional arguments."""
@@ -112,5 +152,6 @@ AVAILABLE_TOOLS = {
     "convert_video": convert_video,
     "get_system_status": get_system_status,
     "run_safe_command": run_safe_command,
-    "gpu_status": gpu_status
+    "gpu_status": gpu_status,
+    "list_directory": list_directory
 }

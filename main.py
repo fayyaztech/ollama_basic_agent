@@ -5,35 +5,70 @@ import json
 from ollama_service import OllamaService
 from tools import AVAILABLE_TOOLS
 
-SYSTEM_PROMPT = """You are a Strict Linux System Agent. You MUST respond in valid JSON format ONLY.
+BASE_SYSTEM_PROMPT = """You are a Strict Linux System Agent with persistent memory. You MUST respond in valid JSON format ONLY.
 
 RESPONSE FORMAT:
-{
+{{
   "thought": "Your internal reasoning for this step.",
   "tool": "tool_name or null",
   "args": ["arg1", "arg2"]
-}
+}}
 
 STRICT RULES:
-1. ONLY respond with the JSON object. No extra text, no markdown blocks unless it is ONLY the JSON.
-2. If the user request is NOT covered by a tool, set "tool": null and provide the reason in "thought".
-3. NEVER provide manual terminal commands or instructions for the user to run themselves.
-4. "args" MUST be a list of strings, even if empty.
-5. All tool calls MUST be whitelisted.
+1. ONLY respond with the JSON object. No extra text.
+2. If the user request is NOT covered by a tool, set "tool": null.
+3. NEVER provide manual terminal commands or instructions.
+4. "args" MUST be a list.
 
 AVAILABLE TOOLS:
 - check_updates(): Checks for system updates.
 - download_youtube(url): Downloads a YouTube video.
 - convert_video(input_file, output_format): Converts video files.
-- get_system_status(): Returns CPU usage, RAM usage, and top processes.
-- gpu_status(): Returns detailed GPU usage (nvidia-smi).
-- run_safe_command(base_cmd, *args): Runs a whitelisted command (available: "ls", "cat", "df", "uptime", "nvidia-smi", "yt-dlp", "ffmpeg").
+- get_system_status(): Returns CPU/RAM usage.
+- gpu_status(): Returns GPU usage.
+- list_directory(path=".", show_sizes=False, include_dir_size=False): List files/folders with optional size info.
+- run_safe_command(base_cmd, *args): Runs whitelisted command (ls, cat, df, uptime, nvidia-smi, yt-dlp, ffmpeg).
+
+CURRENT MEMORY:
+{memory_context}
 """
+
+class MemoryManager:
+    def __init__(self, filename="memory.json"):
+        self.filename = filename
+        self.memory = self.load()
+
+    def load(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r') as f:
+                    return json.load(f)
+            except: pass
+        return {"last_file": "None", "last_command": "None", "notes": []}
+
+    def save(self):
+        with open(self.filename, 'w') as f:
+            json.dump(self.memory, f, indent=2)
+
+    def update(self, tool_name, result, args):
+        self.memory["last_command"] = f"{tool_name}({', '.join(map(str, args))})"
+        
+        # Heuristic extraction
+        if tool_name == "download_youtube" and "Successfully" in result:
+            match = re.search(r"as (.*)$", result)
+            if match: self.memory["last_file"] = match.group(1).strip()
+        elif tool_name == "convert_video" and "Converted" in result:
+            match = re.search(r"Converted to (.*)$", result)
+            if match: self.memory["last_file"] = match.group(1).strip()
+            
+        self.save()
+
+    def get_context(self):
+        return json.dumps(self.memory, indent=2)
 
 def extract_json(text):
     """Extract and parse JSON from the LLM response."""
     try:
-        # Try finding JSON between {} if it exists or parse whole
         match = re.search(r"(\{.*\})", text, re.DOTALL)
         if match:
             return json.loads(match.group(1))
@@ -43,6 +78,7 @@ def extract_json(text):
 
 def main():
     service = OllamaService()
+    mem = MemoryManager()
     
     print("Checking for available Ollama models...")
     models = service.list_models()
@@ -61,22 +97,25 @@ def main():
     print(f"\nUsing model: {selected_model}")
     print("Agent is ready! (type 'quit' to exit)")
     
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Message history with sliding window
+    history = []
     
     while True:
         user_input = input("\nYou: ").strip()
         if user_input.lower() in ['quit', 'exit']:
             break
             
-        messages.append({"role": "user", "content": user_input})
+        history.append({"role": "user", "content": user_input})
+        
+        # Dynamic prompt with current memory
+        current_system_prompt = BASE_SYSTEM_PROMPT.format(memory_context=mem.get_context())
+        messages = [{"role": "system", "content": current_system_prompt}] + history[-14:] # Keep last 14 messages
         
         last_tool_call = None
         
-        # Multi-step reasoning loop (Max 5 steps)
         for step in range(1, 6):
-            print(f"\n[Step {step}] Thinking...", end="", flush=True)
+            print(f"\r[Step {step}] Thinking...", end="", flush=True)
             
-            # Retry logic for JSON parsing
             retries = 1
             data = None
             full_raw_response = ""
@@ -87,31 +126,24 @@ def main():
                     full_raw_response += chunk
                 
                 data = extract_json(full_raw_response)
-                if data:
-                    break
-                else:
-                    if retries > 0:
-                        print("\n[!] JSON parse failed. Retrying...")
-                        messages.append({"role": "user", "content": "Error: Invalid JSON. Respond ONLY in the required JSON format: {'thought': '...', 'tool': '...', 'args': [...]}"})
-                    retries -= 1
+                if data: break
+                if retries > 0:
+                    messages.append({"role": "user", "content": "Error: Invalid JSON. Respond ONLY in JSON."})
+                retries -= 1
             
-            if not data:
-                print("\n[!] Persistent JSON error. Stopping reasoning.")
-                break
+            if not data: break
                 
-            # Clear "Thinking..." and print actual thought
             print(f"\r[Step {step}] Thought: {data.get('thought', '...')}")
             
             tool_name = data.get("tool")
             args = data.get("args", [])
             
-            # Stop condition 1: No tool to call
             if not tool_name or tool_name.lower() == "null":
+                history.append({"role": "assistant", "content": full_raw_response})
                 break
                 
-            # Stop condition 2: Infinite loop detection
             if (tool_name, str(args)) == last_tool_call:
-                print(f"[!] Warning: Repeated tool call ({tool_name}). Stopping to avoid infinite loop.")
+                print(f"[!] Warning: Repeat call. Stopping.")
                 break
             
             last_tool_call = (tool_name, str(args))
@@ -119,34 +151,21 @@ def main():
             if tool_name in AVAILABLE_TOOLS:
                 print(f"[*] Executing {tool_name} with {args}...")
                 try:
-                    if not isinstance(args, list):
-                        raise ValueError("Args must be a list.")
-                        
                     tool_result = AVAILABLE_TOOLS[tool_name](*args)
                     print(f"[*] Result: {tool_result}")
                     
-                    # Update context for next reasoning step
+                    # Update Memory
+                    mem.update(tool_name, tool_result, args)
+                    
                     messages.append({"role": "assistant", "content": full_raw_response})
                     messages.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} returned: {tool_result}"})
+                    history.append({"role": "assistant", "content": full_raw_response})
+                    history.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} returned: {tool_result}"})
                 except Exception as e:
                     print(f"[!] Tool Error: {e}")
                     messages.append({"role": "user", "content": f"[SYSTEM]: Error executing {tool_name}: {e}"})
             else:
                 print(f"[!] Tool {tool_name} not found.")
-                messages.append({"role": "user", "content": f"[SYSTEM]: Tool {tool_name} is not in AVAILABLE_TOOLS."})
-
-        if step == 5 and tool_name and tool_name.lower() != "null":
-            print("\n[*] Reached max reasoning steps (5). Provide final summary.")
-            # Final request for a summary if max steps reached
-            messages.append({"role": "user", "content": "Max steps reached. Please provide a final summary of results now."})
-            summary_response = ""
-            for chunk in service.chat(selected_model, messages, stream=True):
-                summary_response += chunk
-            data_final = extract_json(summary_response)
-            if data_final:
-                print(f"Final Answer: {data_final.get('thought', '...')}")
-            else:
-                print(f"Final Output: {summary_response}")
 
 if __name__ == "__main__":
     main()

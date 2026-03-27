@@ -6,3 +6,4 @@ __pycache__/
 *.mkv
 *.webm
 *.avi
+memory.json
