@@ -4,20 +4,34 @@ import re
 import json
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
 from ollama_service import OllamaService
 from tools import AVAILABLE_TOOLS
+
+# Load .env file if present
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+# ─────────────────────────────────────────────
+# ANSI COLORS
+# ─────────────────────────────────────────────
+COLOR_USER  = "\033[96m"   # Cyan  — user input
+COLOR_AI    = "\033[92m"   # Green — AI response
+COLOR_DEBUG = "\033[33m"   # Yellow — debug steps
+COLOR_RESET = "\033[0m"
+
+DEBUG_MODE = os.getenv("DEBUG", "false").strip().lower() == "true"
 
 # ─────────────────────────────────────────────
 # CONFIG LOADER
 # ─────────────────────────────────────────────
 
 DEFAULT_CONFIG = {
-    "ollama_host": "http://localhost:11434",
-    "max_steps": 5,
-    "history_window": 14,
-    "log_file": "agent.log",
-    "log_level": "INFO",
-    "memory_file": "memory.json"
+    "ollama_host":     os.getenv("OLLAMA_HOST",     "http://localhost:11434"),
+    "max_steps":       int(os.getenv("MAX_STEPS",    "5")),
+    "history_window":  int(os.getenv("HISTORY_WINDOW", "14")),
+    "log_file":        os.getenv("LOG_FILE",        "agent.log"),
+    "log_level":       os.getenv("LOG_LEVEL",       "INFO"),
+    "memory_file":     os.getenv("MEMORY_FILE",     "memory.json"),
 }
 
 def load_config(path="settings.json") -> dict:
@@ -287,7 +301,8 @@ def run_agent(config: dict, logger: logging.Logger):
     print(f"\nUsing model : {selected_model}")
     print(f"Log file    : {config['log_file']}")
     print(f"Memory file : {config['memory_file']}")
-    print("\nAgent is ready! (type 'quit' or 'exit' to stop)\n")
+    print(f"Debug mode  : {'ON' if DEBUG_MODE else 'OFF'}")
+    print(f"\n{COLOR_AI}Agent is ready!{COLOR_RESET} (type 'quit' or 'exit' to stop)\n")
     print("─" * 50)
 
     MAX_STEPS     = config["max_steps"]
@@ -296,16 +311,16 @@ def run_agent(config: dict, logger: logging.Logger):
 
     while True:
         try:
-            user_input = input("\nYou: ").strip()
+            user_input = input(f"\n{COLOR_USER}You:{COLOR_RESET} ").strip()
         except (KeyboardInterrupt, EOFError):
-            print("\n\n[Agent] Goodbye!")
+            print(f"\n\n{COLOR_AI}[Agent] Goodbye!{COLOR_RESET}")
             logger.info("Session ended by user (KeyboardInterrupt / EOF).")
             break
 
         if not user_input:
             continue
         if user_input.lower() in ("quit", "exit"):
-            print("[Agent] Goodbye!")
+            print(f"{COLOR_AI}[Agent] Goodbye!{COLOR_RESET}")
             logger.info("Session ended by user command.")
             break
 
@@ -326,7 +341,8 @@ def run_agent(config: dict, logger: logging.Logger):
         responded      = False
 
         for step in range(1, MAX_STEPS + 1):
-            print(f"\r[Step {step}/{MAX_STEPS}] Thinking...", end="", flush=True)
+            if DEBUG_MODE:
+                print(f"{COLOR_DEBUG}\r[Step {step}/{MAX_STEPS}] Thinking...{COLOR_RESET}", end="", flush=True)
             logger.debug(f"Step {step}: sending {len(messages)} messages to model.")
 
             # ── LLM call with one JSON-retry ──
@@ -355,7 +371,7 @@ def run_agent(config: dict, logger: logging.Logger):
 
             if not data:
                 logger.error(f"Step {step}: could not parse JSON after retry. Raw: {full_raw_response[:200]}")
-                print(f"\n[!] The model returned an unreadable response. Please try rephrasing your request.")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} The model returned an unreadable response. Please try rephrasing your request.")
                 break
 
             thought    = data.get("thought", "")
@@ -366,14 +382,15 @@ def run_agent(config: dict, logger: logging.Logger):
             if not isinstance(args, list):
                 args = [args]
 
-            print(f"\r[Step {step}/{MAX_STEPS}] Thought: {thought}")
-            logger.info(f"Step {step} | tool={tool_name} | args={args} | thought={thought[:80]}")
+            logger.debug(f"Step {step} | tool={tool_name} | args={args} | thought={thought[:80]}")
+            if DEBUG_MODE:
+                print(f"{COLOR_DEBUG}[Step {step}] tool={tool_name} | args={args}{COLOR_RESET}")
 
             # ── No tool → final answer ──
             if not tool_name or str(tool_name).lower() == "null":
-                print(f"\nAgent: {thought}")
-                logger.info(f"Agent response: {thought}")
-                history.append({"role": "assistant", "content": full_raw_response})
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {thought}")
+                logger.debug(f"Agent response: {thought}")
+                history.append({"role": "assistant", "content": thought})
                 responded = True
                 break
 
@@ -385,7 +402,7 @@ def run_agent(config: dict, logger: logging.Logger):
                     "stopping to avoid an infinite loop. "
                     "Please rephrase your request or check the last tool result."
                 )
-                print(f"\n[!] {msg}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {msg}")
                 logger.warning(f"Duplicate tool call detected: {call_signature}")
                 responded = True
                 break
@@ -399,42 +416,40 @@ def run_agent(config: dict, logger: logging.Logger):
                     f"My available tools are: {available}. "
                     "Please rephrase your request."
                 )
-                print(f"\n[!] Unknown tool '{tool_name}'.")
                 logger.warning(f"Unknown tool requested: '{tool_name}'")
-                print(f"Agent: {msg}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {msg}")
                 responded = True
                 break
 
             # ── Execute tool ──
-            print(f"[*] Calling {tool_name}({', '.join(map(str, args))})...")
-            logger.info(f"Executing tool: {tool_name}({args})")
+            logger.debug(f"Executing tool: {tool_name}({args})")
+            if DEBUG_MODE:
+                print(f"{COLOR_DEBUG}[*] Calling {tool_name}({', '.join(map(str, args))})...{COLOR_RESET}")
 
             try:
                 tool_result = AVAILABLE_TOOLS[tool_name](*args)
-                print(f"[*] Result: {tool_result}")
-                logger.info(f"Tool result [{tool_name}]: {str(tool_result)[:300]}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {tool_result}")
+                logger.debug(f"Tool result [{tool_name}]: {str(tool_result)[:300]}")
             except TypeError as e:
                 tool_result = (
                     f"Tool '{tool_name}' was called with wrong arguments: {e}. "
                     "Please check argument types and try again."
                 )
                 logger.error(f"TypeError in tool '{tool_name}': {e}")
-                print(f"\n[!] {tool_result}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {tool_result}")
             except Exception as e:
                 tool_result = (
                     f"An unexpected error occurred while running '{tool_name}': {e}."
                 )
                 logger.exception(f"Unexpected error in tool '{tool_name}': {e}")
-                print(f"\n[!] {tool_result}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {tool_result}")
 
             # Update memory and conversation
             mem.update(tool_name, str(tool_result), args)
 
-            tool_msg = {"role": "user", "content": f"[SYSTEM]: Tool '{tool_name}' returned:\n{tool_result}"}
-            history.append({"role": "assistant", "content": full_raw_response})
-            history.append(tool_msg)
-            messages.append({"role": "assistant", "content": full_raw_response})
-            messages.append(tool_msg)
+            # Only append the tool result as a user-facing message (do not print again)
+            history.append({"role": "assistant", "content": str(tool_result)})
+            messages.append({"role": "assistant", "content": str(tool_result)})
 
         else:
             # Loop exhausted without a break → max steps reached
@@ -443,7 +458,7 @@ def run_agent(config: dict, logger: logging.Logger):
                     f"I reached the maximum reasoning limit ({MAX_STEPS} steps) "
                     "without a final answer. Please try a simpler or more specific request."
                 )
-                print(f"\nAgent: {msg}")
+                print(f"\n{COLOR_AI}Agent:{COLOR_RESET} {msg}")
                 logger.warning(f"Max steps ({MAX_STEPS}) reached without response.")
 
 

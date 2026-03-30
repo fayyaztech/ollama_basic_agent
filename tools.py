@@ -1,5 +1,16 @@
+
+import os
 import json
+import logging
+import subprocess
+import psutil
 from datetime import datetime
+
+# ─────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────
+
+HOME_DIR = os.path.expanduser("~")
 
 # Token usage tracking with cost calculation
 TOKEN_LOG_PATH = os.path.join(HOME_DIR, ".ollama_agent_token_log.json")
