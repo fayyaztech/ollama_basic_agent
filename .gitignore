@@ -9,3 +9,5 @@ __pycache__/
 memory.json
 agent.log
 settings.json
+.env
+.ollama_agent_token_log.json

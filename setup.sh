@@ -15,6 +15,6 @@ source .venv/bin/activate
 
 # Ensure pip is up to date and install dependencies
 python3 -m pip install --upgrade pip
-python3 -m pip install requests yt-dlp psutil
+python3 -m pip install requests yt-dlp psutil python-dotenv
 
 echo "Setup complete! Use ./run.sh to start the agent."
