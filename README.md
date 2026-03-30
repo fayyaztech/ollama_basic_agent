@@ -135,6 +135,36 @@ Select your preferred model from the list and start chatting!
 
 ---
 
+## Tool Implementation Status
+
+| Tool | Status |
+|------|--------|
+| get_system_status | ✅ Completed |
+| gpu_status | ✅ Completed |
+| download_youtube | ✅ Completed |
+| convert_video | ✅ Completed |
+| run_safe_command | ✅ Completed |
+| check_updates | ✅ Completed |
+| search_files | 🚧 In Progress |
+| find_text_in_files | ⏳ Not Started |
+| list_processes | ⏳ Not Started |
+| kill_process | ⏳ Not Started |
+| restart_process | ⏳ Not Started |
+| network_status | ⏳ Not Started |
+| ping_host | ⏳ Not Started |
+| traceroute_host | ⏳ Not Started |
+| download_file | ⏳ Not Started |
+| upload_file | ⏳ Not Started |
+| summarize_text | ⏳ Not Started |
+| translate_text | ⏳ Not Started |
+| convert_image | ⏳ Not Started |
+| resize_image | ⏳ Not Started |
+| analyze_image | ⏳ Not Started |
+| schedule_task | ⏳ Not Started |
+| set_reminder | ⏳ Not Started |
+
+---
+
 ## Additional Utility Ideas
 
 - **File Search:** Search for files or text within files.
